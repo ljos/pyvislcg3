@@ -1,0 +1,6 @@
+build/
+*.so
+src/cg3/*.c
+*.dSYM
+src/memstream/test
+*.o
