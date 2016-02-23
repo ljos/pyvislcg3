@@ -13,7 +13,6 @@ setup(
         Extension(
             'cg3.core',
             ['cg3/core.pyx'],
-            include_dirs =['.', 'c'],
             libraries=['cg3']
         )
     ])

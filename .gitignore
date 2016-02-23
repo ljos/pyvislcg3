@@ -4,3 +4,4 @@ src/cg3/*.c
 *.dSYM
 *.o
 *.pyc
+/cg3/**/*.c

@@ -28,7 +28,6 @@ cdef extern from "cg3.h":
         CG3O_SECTIONS      = 1
         CG3O_SECTIONS_TEXT = 2
 
-
     bint cg3_init(FILE *inp, FILE *out, FILE *err)
     bint cg3_cleanup()
 
