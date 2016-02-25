@@ -1,28 +1,66 @@
 # Cython bindings to libcg3
 
+import os
+
 cimport cg3.ccore as c
 
+from contextlib import contextmanager
+from funcparserlib.lexer import make_tokenizer
+from funcparserlib.parser import oneplus, many, some
 from libc.stdio cimport FILE, fdopen
 from re import fullmatch, findall
-from io import BytesIO
+from tempfile import mkstemp
+
+@contextmanager
+def cg3_error():
+    cdef FILE* f
+    try:
+        fd, path = mkstemp()
+        f = fdopen(fd, 'w')
+
+        # We only need one FILE object as it is only the error one
+        # that is used.
+        if not c.cg3_init(f, f, f):
+            # Cleanup first so the file is closed and we can open it
+            # in python.
+            c.cg3_cleanup()
+            with open(path) as err:
+                error_msg = err.readline()
+                raise Exception(error_msg)
+
+        yield
+
+        c.cg3_cleanup()
+        with open(path) as err:
+            error_msg = err.readline()
+            # CG3 also reports warnings, so we need to check if it
+            # really is a error that we are recieving. It would be
+            # better if we could check the if return from CG3 is
+            # NULL, but I don't know how to do that with a context
+            # manager.
+            if error_msg.startswith('CG3 Error:'):
+                raise Exception(error_msg)
+    finally:
+        # Remove the file from the OS.
+        os.remove(path)
+
 
 cdef class Tag:
-    cdef c.cg3_tag *_raw_tag
-
-    def __repr__(self):
-        text = self.to_string()
-        return 'Tag<"{}">'.format(text)
+    cdef c.cg3_tag* _raw
 
     def __str__(self):
-        cdef bytes string = c.cg3_tag_gettext_u8(self._raw_tag)
+        cdef bytes string = c.cg3_tag_gettext_u8(self._raw)
         return string.decode()
+
+    def __repr__(self):
+        return 'Tag<"{}">'.format(str(self))
 
 
 cdef class Reading:
-    cdef c.cg3_reading *_raw_reading
+    cdef c.cg3_reading* _raw
 
     def __len__(self):
-        cdef size_t n = c.cg3_reading_numtags(self._raw_reading)
+        cdef size_t n = c.cg3_reading_numtags(self._raw)
         return n
 
     def __getitem__(self, key):
@@ -38,7 +76,7 @@ cdef class Reading:
                 raise IndexError('Reading index out of bounds')
 
             tag = Tag()
-            tag._raw_tag = c.cg3_reading_gettag(self._raw_reading, key % len(self))
+            tag._raw = c.cg3_reading_gettag(self._raw, key % len(self))
             return tag
 
         raise TypeError(
@@ -50,15 +88,15 @@ cdef class Reading:
             yield self[i]
 
     def add_tag(self, Tag tag):
-        return c.cg3_reading_addtag(self._raw_reading, tag._raw_tag)
+        return c.cg3_reading_addtag(self._raw, tag._raw)
 
 
 cdef class Cohort:
-    cdef c.cg3_cohort *_raw_cohort
+    cdef c.cg3_cohort* _raw
 
     def __len__(self):
         cdef size_t n
-        n = c.cg3_cohort_numreadings(self._raw_cohort)
+        n = c.cg3_cohort_numreadings(self._raw)
         return n
 
     def __getitem__(self, key):
@@ -74,8 +112,8 @@ cdef class Cohort:
                 raise IndexError('Cohort index out of bounds')
 
             reading = Reading()
-            reading._raw_reading = c.cg3_cohort_getreading(
-                self._raw_cohort,
+            reading._raw = c.cg3_cohort_getreading(
+                self._raw,
                 key % len(self)
             )
             return reading
@@ -88,29 +126,35 @@ cdef class Cohort:
         for i in range(len(self)):
             yield self[i]
 
+    def __repr__(self):
+        return "Cohort({})".format(str(self.get_wordform()))
+
     def get_wordform(self):
         cdef Tag tag = Tag()
-        tag._raw_tag = c.cg3_cohort_getwordform(self._raw_cohort)
+        tag._raw = c.cg3_cohort_getwordform(self._raw)
         return tag
 
+    def set_wordform(self, Tag wordform):
+        c.cg3_cohort_setwordform(self._raw, wordform._raw)
+
     def add_reading(self, Reading reading):
-        c.cg3_cohort_addreading(self._raw_cohort, reading._raw_reading)
+        c.cg3_cohort_addreading(self._raw, reading._raw)
 
     def create_reading(self):
         cdef Reading reading = Reading()
-        reading._raw_reading = c.cg3_reading_create(self._raw_cohort)
+        reading._raw = c.cg3_reading_create(self._raw)
         return reading
 
 
 cdef class Document:
-    cdef c.cg3_sentence *_raw_doc
+    cdef c.cg3_sentence* _raw
 
     def __cinit__(self, Applicator applicator):
-        self._raw_doc = c.cg3_sentence_new(applicator._raw_applicator)
+        self._raw = c.cg3_sentence_new(applicator._raw)
 
     def __len__(self):
         cdef size_t n
-        n = c.cg3_sentence_numcohorts(self._raw_doc)
+        n = c.cg3_sentence_numcohorts(self._raw)
         return n
 
     def __getitem__(self, key):
@@ -127,10 +171,7 @@ cdef class Document:
                 raise IndexError('Document index out of bounds')
 
             cohort = Cohort()
-            cohort._raw_cohort = c.cg3_sentence_getcohort(
-                self._raw_doc,
-                key % len(self)
-            )
+            cohort._raw = c.cg3_sentence_getcohort(self._raw, key % len(self))
             return cohort
 
         raise TypeError(
@@ -142,89 +183,87 @@ cdef class Document:
             yield self[i]
 
     def add_cohort(self, Cohort cohort):
-        c.cg3_sentence_addcohort(self._raw_doc, cohort._raw_cohort)
+        c.cg3_sentence_addcohort(self._raw, cohort._raw)
 
     def create_cohort(self, Tag wordform):
         cdef Cohort cohort = Cohort()
-        cohort._raw_cohort = c.cg3_cohort_create(self._raw_doc)
-        c.cg3_cohort_setwordform(cohort._raw_cohort, wordform._raw_tag)
+        cohort._raw = c.cg3_cohort_create(self._raw)
+        cohort.set_wordform(wordform)
         return cohort
-
-    def __dealloc__(self):
-        c.cg3_sentence_free(self._raw_doc)
 
 
 cdef class Applicator:
-    cdef c.cg3_grammar *_raw_grammar
-    cdef c.cg3_applicator *_raw_applicator
+    cdef c.cg3_applicator* _raw
 
     def __cinit__(self, grammar_file):
-        self._stdin = BytesIO()
-        self._stdout = BytesIO()
-        self._stderr = BytesIO()
+        cdef c.cg3_grammar* grammar
 
-        cdef FILE *fd_in = fdopen(self._stdin.fileno(), 'w')
-        cdef FILE *fd_out = fdopen(self._stdout.fileno(), 'w')
-        cdef FILE *fd_err = fdopen(self._stderr.fileno(), 'w')
+        with cg3_error():
+            grammar = c.cg3_grammar_load(grammar_file.encode())
 
-        success = c.cg3_init(fd_in, fd_out, fd_err)
-        if not success:
-            raise Exception('Failed initializing cg3')
+        with cg3_error():
+            self._raw = c.cg3_applicator_create(grammar)
 
-        f = grammar_file.encode()
-        self._raw_grammar = c.cg3_grammar_load(f)
-        error_msg = self._stderr.readall().decode()
-        if error_msg.startswith('CG3 Error:'):
-            raise Exception(error_msg)
-
-        self._raw_applicator = c.cg3_applicator_create(self._raw_grammar)
-        error_msg = self._stderr.readall().decode()
-        if error_msg.startswith("CG3 Error:"):
-            raise Exception(error_msg)
-
-        c.cg3_applicator_setflags(self._raw_applicator, c.CG3F_NO_PASS_ORIGIN)
+        c.cg3_applicator_setflags(self._raw, c.CG3F_NO_PASS_ORIGIN)
 
     def create_tag(self, text):
         cdef Tag tag = Tag()
         try:
-            tag._raw_tag = c.cg3_tag_create_u8(
-                self._raw_applicator,
-                text.encode()
-            )
+            tag._raw = c.cg3_tag_create_u8(self._raw, text.encode())
         except TypeError:
-           tag._raw_tag = c.cg3_tag_create_u8(self._raw_applicator, text)
+           tag._raw = c.cg3_tag_create_u8(self._raw, text)
         return tag
 
     def parse(self, f):
-        self.cg3_init()
+        def tokenize(string):
+            specs = [
+                ('Word', (r'<word>.+</word>',)),
+                ('Cohort', (r'"<[^>]+>"',)),
+                ('Reading', (r'"[^"]+"',)),
+                ('Space', (r'\s+',)),
+                ('NL', (r'[\r\n]+',)),
+                ('PoS', (r'\S+',))
+            ]
+            useless = ['NL', 'Space', 'Word']
+            t = make_tokenizer(specs)
+            return [x for x in t(string) if x.type not in useless]
+
+        tokens = tokenize(f.read())
+
+        tokval = lambda x: x.value
+        toktype = lambda t: some(lambda x: x.type == t) >> tokval
+
+        pos = toktype('PoS')
+        reading = toktype('Reading') + many(pos)
+        cohort = toktype('Cohort') + oneplus(reading)
+        sentence = many(cohort)
+
+        document = sentence.parse(tokens)
+
         doc = Document(self)
-        line = f.readline().strip()
-        while line:
-            if fullmatch(r'"<[^>]*>"', line):
-                tag = self.create_tag(line)
-                cohort = doc.create_cohort(tag)
-                doc.add_cohort(cohort)
-            elif line:
+
+        for cohort in document:
+            wordform, *readings = cohort
+            wordform = self.create_tag(wordform)
+            cohort = doc.create_cohort(wordform)
+            for pos in readings:
                 reading = cohort.create_reading()
+                for p in pos:
+                    p = self.create_tag(p)
+                    reading.add_tag(p)
                 cohort.add_reading(reading)
-                for tag in findall(r'\S+', line):
-                    tag = self.create_tag(tag)
-                    if not reading.add_tag(tag):
-                        error_msg = self._stderr.readall().decode()
-                        raise Exception(error_msg)
-            line = f.readline().strip()
+            doc.add_cohort(cohort)
+
         return doc
 
     def run_rules(self, Document doc):
-        self.cg3_init()
-        c.cg3_sentence_runrules(self._raw_applicator, doc._raw_doc)
-        for cohort in doc:
+        c.cg3_sentence_runrules(self._raw, doc._raw)
+        # The first cohort is <<<, we don't need that.
+        for cohort in doc[1:]:
             for reading in cohort:
-                print(str(reading[0]))
-                tags = [str(tag) for tag in reading[1:]]
-                print('\t' + ' '.join(tags))
+                head, *reading = reading
+                print(str(head))
+                print('\t' + ' '.join([str(tag) for tag in reading]))
 
     def __dealloc__(self):
-        c.cg3_cleanup()
-        c.cg3_applicator_free(self._raw_applicator)
-        c.cg3_grammar_free(self._raw_grammar)
+        c.cg3_applicator_free(self._raw)
