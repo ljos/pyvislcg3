@@ -157,9 +157,6 @@ cdef class Cohort:
 cdef class Document:
     cdef c.cg3_sentence* _raw
 
-    def __cinit__(self, Applicator applicator):
-        self._raw = c.cg3_sentence_new(applicator._raw)
-
     def __len__(self):
         cdef size_t n
         n = c.cg3_sentence_numcohorts(self._raw)
@@ -250,7 +247,8 @@ cdef class Applicator:
 
         document = sentence.parse(tokens)
 
-        doc = Document(self)
+        doc = Document()
+        doc._raw c.cg3_sentence_new(applicator._raw)
 
         for cohort in document:
             wordform, *readings = cohort
