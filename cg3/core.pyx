@@ -11,6 +11,9 @@ from libc.stdio cimport FILE, fdopen
 from re import fullmatch, findall
 from tempfile import mkstemp
 
+# We are using a context manager instead of a decorator because cython
+# functions and methods can't have python decorators without having
+# trouble with the return type.
 @contextmanager
 def cg3_error():
     cdef FILE* f
@@ -45,6 +48,7 @@ def cg3_error():
         os.remove(path)
 
 
+# Is this class really needed?
 cdef class Tag:
     cdef c.cg3_tag* _raw
 
@@ -56,6 +60,8 @@ cdef class Tag:
         return 'Tag<"{}">'.format(str(self))
 
 
+# The first tag of a reading is the lexeme, the rest are
+# part-of-speech. Should we encode those semantics?
 cdef class Reading:
     cdef c.cg3_reading* _raw
 
@@ -140,6 +146,8 @@ cdef class Cohort:
     def add_reading(self, Reading reading):
         c.cg3_cohort_addreading(self._raw, reading._raw)
 
+    # When creating a reading it is not automatically added to the
+    # cohort. Should we change that here in python?
     def create_reading(self):
         cdef Reading reading = Reading()
         reading._raw = c.cg3_reading_create(self._raw)
@@ -191,7 +199,9 @@ cdef class Document:
         cohort.set_wordform(wordform)
         return cohort
 
-
+# As the cg3 library is dependent on some global state, there is a
+# case for making this a singlton object. That could also make the
+# python api nicer.
 cdef class Applicator:
     cdef c.cg3_applicator* _raw
 
