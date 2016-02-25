@@ -243,9 +243,9 @@ cdef class Applicator:
         pos = toktype('PoS')
         reading = toktype('Reading') + many(pos)
         cohort = toktype('Cohort') + oneplus(reading)
-        sentence = many(cohort)
+        parser = many(cohort)
 
-        document = sentence.parse(tokens)
+        document = parser.parse(tokens)
 
         doc = Document()
         doc._raw c.cg3_sentence_new(applicator._raw)
