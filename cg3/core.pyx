@@ -184,6 +184,16 @@ cdef class Document:
         document._raw = raw
         return document
 
+    def __str__():
+    # The first cohort is <<<, we don't need that.
+        l = []
+        for cohort in self[1:]:
+            for reading in cohort:
+                head, *reading = reading
+                l.append(str(head))
+                l.append('\t' + ' '.join([str(tag) for tag in reading]))
+        return '\n'.join(l)
+
     def __len__(self):
         cdef size_t n
         n = c.cg3_sentence_numcohorts(self._raw)
@@ -315,12 +325,6 @@ cdef class Applicator:
     def run_rules(self, Document doc):
         with cg3_error:
             c.cg3_sentence_runrules(self._raw, doc._raw)
-        # The first cohort is <<<, we don't need that.
-        for cohort in doc[1:]:
-            for reading in cohort:
-                head, *reading = reading
-                print(str(head))
-                print('\t' + ' '.join([str(tag) for tag in reading]))
 
     def __dealloc__(self):
         c.cg3_applicator_free(self._raw)
