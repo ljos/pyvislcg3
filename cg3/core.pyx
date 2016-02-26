@@ -52,6 +52,12 @@ def cg3_error():
 cdef class Tag:
     cdef c.cg3_tag* _raw
 
+    @staticmethod
+    cdef create(c.cg3_tag* raw):
+        tag = Tag()
+        tag._raw = raw
+        return tag
+
     def __str__(self):
         cdef bytes string = c.cg3_tag_gettext_u8(self._raw)
         return string.decode()
@@ -65,12 +71,18 @@ cdef class Tag:
 cdef class Reading:
     cdef c.cg3_reading* _raw
 
+    @staticmethod
+    cdef create(c.cg3_reading* raw):
+        reading = Reading()
+        reading._raw = raw
+        return reading
+
     def __len__(self):
         cdef size_t n = c.cg3_reading_numtags(self._raw)
         return n
 
     def __getitem__(self, key):
-        cdef Tag tag
+        cdef c.cg3_reading* tag
         if isinstance(key, slice):
             l = []
             for i in range(*key.indices(len(self))):
@@ -81,9 +93,8 @@ cdef class Reading:
             if len(self) <= key:
                 raise IndexError('Reading index out of bounds')
 
-            tag = Tag()
-            tag._raw = c.cg3_reading_gettag(self._raw, key % len(self))
-            return tag
+            tag = c.cg3_reading_gettag(self._raw, key % len(self))
+            return Tag.create(tag)
 
         raise TypeError(
             'Cohort indices must be a slice or an integer, not {}'.format(type(key))
@@ -96,9 +107,20 @@ cdef class Reading:
     def add_tag(self, Tag tag):
         return c.cg3_reading_addtag(self._raw, tag._raw)
 
+    def __dealloc__(self):
+        # Freed by the the cohort it belongs to.
+        pass
+
 
 cdef class Cohort:
     cdef c.cg3_cohort* _raw
+
+    @staticmethod
+    cdef create(c.cg3_cohort* raw, Tag wordform):
+        cohort = Cohort()
+        cohort._raw = raw
+        c.cg3_cohort_setwordform(raw, wordform._raw)
+        return cohort
 
     def __len__(self):
         cdef size_t n
@@ -106,7 +128,7 @@ cdef class Cohort:
         return n
 
     def __getitem__(self, key):
-        cdef Reading reading
+        cdef c.cg3_reading* reading
         if isinstance(key, slice):
             l = []
             for i in range(*key.indices(len(self))):
@@ -117,12 +139,8 @@ cdef class Cohort:
             if len(self) <= key:
                 raise IndexError('Cohort index out of bounds')
 
-            reading = Reading()
-            reading._raw = c.cg3_cohort_getreading(
-                self._raw,
-                key % len(self)
-            )
-            return reading
+            reading = c.cg3_cohort_getreading(self._raw, key % len(self))
+            return Reading.create(reading)
 
         raise TypeError(
             'Cohort indices must be integers, not {}'.format(type(key))
@@ -136,12 +154,9 @@ cdef class Cohort:
         return "Cohort({})".format(str(self.get_wordform()))
 
     def get_wordform(self):
-        cdef Tag tag = Tag()
-        tag._raw = c.cg3_cohort_getwordform(self._raw)
-        return tag
-
-    def set_wordform(self, Tag wordform):
-        c.cg3_cohort_setwordform(self._raw, wordform._raw)
+        cdef c.cg3_tag* tag
+        tag = c.cg3_cohort_getwordform(self._raw)
+        return Tag.create(tag)
 
     def add_reading(self, Reading reading):
         c.cg3_cohort_addreading(self._raw, reading._raw)
@@ -149,13 +164,23 @@ cdef class Cohort:
     # When creating a reading it is not automatically added to the
     # cohort. Should we change that here in python?
     def create_reading(self):
-        cdef Reading reading = Reading()
-        reading._raw = c.cg3_reading_create(self._raw)
-        return reading
+        cdef c.cg3_reading* reading
+        reading = c.cg3_reading_create(self._raw)
+        return Reading.create(reading)
+
+    def __dealloc__(self):
+        # Freed by the the document it belongs to.
+        pass
 
 
 cdef class Document:
     cdef c.cg3_sentence* _raw
+
+    @staticmethod
+    cdef create(c.cg3_sentence* raw):
+        document = Document()
+        document._raw = raw
+        return document
 
     def __len__(self):
         cdef size_t n
@@ -191,10 +216,31 @@ cdef class Document:
         c.cg3_sentence_addcohort(self._raw, cohort._raw)
 
     def create_cohort(self, Tag wordform):
-        cdef Cohort cohort = Cohort()
-        cohort._raw = c.cg3_cohort_create(self._raw)
-        cohort.set_wordform(wordform)
-        return cohort
+        cdef c.cg3_cohort* cohort
+        cohort = c.cg3_cohort_create(self._raw)
+        return Cohort.create(cohort, wordform)
+
+
+    def __dealloc__(self):
+        c.cg3_sentence_free(self._raw)
+
+cdef class Grammar:
+    cdef c.cg3_grammar* _raw
+
+    @staticmethod
+    cdef create(grammar_file):
+        grammar = Grammar()
+        grammar._raw = c.cg3_grammar_load(grammar_file.encode())
+        return grammar
+
+    def create_applicator(self):
+        with cg3_error():
+            raw = c.cg3_applicator_create(self._raw)
+            return Applicator.create(raw)
+
+    def __dealloc__(self):
+        c.cg3_grammar_free(self._raw)
+
 
 # As the cg3 library is dependent on some global state, there is a
 # case for making this a singlton object. That could also make the
@@ -202,24 +248,20 @@ cdef class Document:
 cdef class Applicator:
     cdef c.cg3_applicator* _raw
 
-    def __cinit__(self, grammar_file):
-        cdef c.cg3_grammar* grammar
-
-        with cg3_error():
-            grammar = c.cg3_grammar_load(grammar_file.encode())
-
-        with cg3_error():
-            self._raw = c.cg3_applicator_create(grammar)
-
-        c.cg3_applicator_setflags(self._raw, c.CG3F_NO_PASS_ORIGIN)
+    @staticmethod
+    cdef create(c.cg3_applicator* raw):
+        applicator = Applicator()
+        applicator._raw = raw
+        c.cg3_applicator_setflags(raw, c.CG3F_NO_PASS_ORIGIN)
+        return applicator
 
     def create_tag(self, text):
-        cdef Tag tag = Tag()
+        cdef c.cg3_tag* tag
         try:
-            tag._raw = c.cg3_tag_create_u8(self._raw, text.encode())
+            tag = c.cg3_tag_create_u8(self._raw, text.encode())
         except TypeError:
-           tag._raw = c.cg3_tag_create_u8(self._raw, text)
-        return tag
+           tag = c.cg3_tag_create_u8(self._raw, text)
+        return Tag.create(tag)
 
     def parse(self, f):
         def tokenize(string):
@@ -247,8 +289,8 @@ cdef class Applicator:
 
         document = parser.parse(tokens)
 
-        doc = Document()
-        doc._raw c.cg3_sentence_new(applicator._raw)
+        cdef c.cg3_sentence* raw_doc = c.cg3_sentence_new(self._raw)
+        doc = Document.create(raw_doc)
 
         for cohort in document:
             wordform, *readings = cohort
@@ -265,7 +307,8 @@ cdef class Applicator:
         return doc
 
     def run_rules(self, Document doc):
-        c.cg3_sentence_runrules(self._raw, doc._raw)
+        with cg3_error:
+            c.cg3_sentence_runrules(self._raw, doc._raw)
         # The first cohort is <<<, we don't need that.
         for cohort in doc[1:]:
             for reading in cohort:
