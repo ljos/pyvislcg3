@@ -289,8 +289,8 @@ cdef class Applicator:
 
         document = parser.parse(tokens)
 
-        cdef c.cg3_sentence* raw_doc = c.cg3_sentence_new(self._raw)
-        doc = Document.create(raw_doc)
+        cdef c.cg3_sentence* sentence = c.cg3_sentence_new(self._raw)
+        doc = Document.create(sentence)
 
         for cohort in document:
             wordform, *readings = cohort
