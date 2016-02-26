@@ -81,6 +81,7 @@ cdef class Reading:
         cdef size_t n = c.cg3_reading_numtags(self._raw)
         return n
 
+    # Make it possible to treat Reading as a list.
     def __getitem__(self, key):
         cdef c.cg3_reading* tag
         if isinstance(key, slice):
@@ -127,6 +128,7 @@ cdef class Cohort:
         n = c.cg3_cohort_numreadings(self._raw)
         return n
 
+    # Make it possible to treat cohort as a list.
     def __getitem__(self, key):
         cdef c.cg3_reading* reading
         if isinstance(key, slice):
@@ -187,6 +189,7 @@ cdef class Document:
         n = c.cg3_sentence_numcohorts(self._raw)
         return n
 
+    # Treat the document as a list of cohorts.
     def __getitem__(self, key):
         cdef Cohort cohort
 
@@ -215,6 +218,9 @@ cdef class Document:
     def add_cohort(self, Cohort cohort):
         c.cg3_sentence_addcohort(self._raw, cohort._raw)
 
+    # Created cohorts do not belong to the document and need to be
+    # freed manually. Cohorts added to a document is freed by the
+    # document.
     def create_cohort(self, Tag wordform):
         cdef c.cg3_cohort* cohort
         cohort = c.cg3_cohort_create(self._raw)
