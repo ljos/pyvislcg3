@@ -65,7 +65,7 @@ cdef class Tag:
         return string.decode()
 
     def __repr__(self):
-        return 'Tag<"{}">'.format(str(self))
+        return '<{} "{}">'.format(self.__class__.__name__, str(self))
 
 
 # The first tag of a reading is the lexeme, the rest are
@@ -78,6 +78,10 @@ cdef class Reading:
         reading = Reading()
         reading._raw = raw
         return reading
+
+    def __str__(self):
+        return ' '.join([str(tag) for tag in self])
+
 
     def __len__(self):
         cdef size_t n = c.cg3_reading_numtags(self._raw)
@@ -150,12 +154,17 @@ cdef class Cohort:
             'Cohort indices must be integers, not {}'.format(type(key))
         )
 
+    def __str__(self):
+        wordform = self.get_wordform()
+        readings = ['\t' + str(reading) for reading in self]
+        return str(wordform) + '\n' + '\n'.join(readings)
+
     def __iter__(self):
         for i in range(len(self)):
             yield self[i]
 
     def __repr__(self):
-        return "Cohort({})".format(str(self.get_wordform()))
+        return "<{} {}>".format(str(self.get_wordform()))
 
     def get_wordform(self):
         cdef c.cg3_tag* tag
@@ -186,15 +195,10 @@ cdef class Document:
         document._raw = raw
         return document
 
-    def __str__():
-    # The first cohort is <<<, we don't need that.
-        l = []
-        for cohort in self[1:]:
-            for reading in cohort:
-                head, *reading = reading
-                l.append(str(head))
-                l.append('\t' + ' '.join([str(tag) for tag in reading]))
-        return '\n'.join(l)
+    def __str__(self):
+        # The first cohort is <<<, we don't need that.
+
+        return '\n'.join([str(cohort) for cohort in self[1:]])
 
     def __len__(self):
         cdef size_t n
@@ -258,6 +262,10 @@ cdef class Grammar:
             grammar._raw = c.cg3_grammar_load(grammar_file.encode())
 
         return grammar
+
+    def __repr__(self):
+        return '<{} file: "{}">'.format(
+            self.__class__.__name__, self.filename)
 
     def create_applicator(self):
         with cg3_error():
