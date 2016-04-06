@@ -1,13 +1,14 @@
 # Cython bindings to libcg3
 
-import os
-
 cimport cg3.ccore as c
+
+import os
 
 from contextlib import contextmanager
 from funcparserlib.lexer import make_tokenizer
 from funcparserlib.parser import oneplus, many, some
 from libc.stdio cimport FILE, fdopen
+from pathlib import Path
 from re import fullmatch, findall
 from tempfile import mkstemp
 
@@ -21,11 +22,12 @@ def cg3_error():
         fd, path = mkstemp()
         f = fdopen(fd, 'w')
 
-        # We only need one FILE object as it is only the error one
-        # that is used.
+
+        # We only need one FILE object as cg3 only prints to the error
+        # file.
         if not c.cg3_init(f, f, f):
-            # Cleanup first so the file is closed and we can open it
-            # in python.
+            # Cleanup before looking for error so the file is closed
+            # and we can open it back up again in python.
             c.cg3_cleanup()
             with open(path) as err:
                 error_msg = err.readline()
@@ -242,11 +244,19 @@ cdef class Document:
 
 cdef class Grammar:
     cdef c.cg3_grammar* _raw
+    cdef str filename
 
     @staticmethod
-    cdef create(grammar_file):
+    def create(grammar_file):
         grammar = Grammar()
-        grammar._raw = c.cg3_grammar_load(grammar_file.encode())
+
+        if not Path(grammar_file).is_file():
+            raise FileNotFoundError(grammar_file)
+
+        grammar.filename = grammar_file
+        with cg3_error():
+            grammar._raw = c.cg3_grammar_load(grammar_file.encode())
+
         return grammar
 
     def create_applicator(self):
