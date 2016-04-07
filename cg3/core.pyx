@@ -68,8 +68,9 @@ cdef class Tag:
         return '<{} "{}">'.format(self.__class__.__name__, str(self))
 
 
-# The first tag of a reading is the lexeme, the rest are
-# part-of-speech. Should we encode those semantics?
+# The second tag (the first is the cohort name) of a reading is the
+# lexeme, the rest are part-of-speech. Should we encode those
+# semantics?
 cdef class Reading:
     cdef c.cg3_reading* _raw
 
@@ -80,8 +81,11 @@ cdef class Reading:
         return reading
 
     def __str__(self):
-        return ' '.join([str(tag) for tag in self])
+        # The first tag is the cohort name.
+        return ' '.join([str(tag) for tag in self[1:]])
 
+    def __repr__(self):
+        return '<{} {}>'.format(self.__class__.__name__, self[1])
 
     def __len__(self):
         cdef size_t n = c.cg3_reading_numtags(self._raw)
@@ -164,7 +168,8 @@ cdef class Cohort:
             yield self[i]
 
     def __repr__(self):
-        return "<{} {}>".format(str(self.get_wordform()))
+        return "<{} {}>".format(
+            self.__class__.__name__, str(self.get_wordform()))
 
     def get_wordform(self):
         cdef c.cg3_tag* tag
@@ -178,6 +183,7 @@ cdef class Cohort:
     # cohort. Should we change that here in python?
     def create_reading(self):
         cdef c.cg3_reading* reading
+        # Sets the wordform of the cohort as the first tag.
         reading = c.cg3_reading_create(self._raw)
         return Reading.create(reading)
 
@@ -188,16 +194,19 @@ cdef class Cohort:
 
 cdef class Document:
     cdef c.cg3_sentence* _raw
+    # Need to hold onto a reference so the document isn't garbage
+    # collected when the applicator goes out of scope.
+    cdef Applicator _app
 
     @staticmethod
-    cdef create(c.cg3_sentence* raw):
+    cdef create(c.cg3_sentence* raw, Applicator app):
         document = Document()
         document._raw = raw
+        document._app = app
         return document
 
     def __str__(self):
         # The first cohort is <<<, we don't need that.
-
         return '\n'.join([str(cohort) for cohort in self[1:]])
 
     def __len__(self):
@@ -242,59 +251,40 @@ cdef class Document:
         cohort = c.cg3_cohort_create(self._raw)
         return Cohort.create(cohort, wordform)
 
-
     def __dealloc__(self):
         c.cg3_sentence_free(self._raw)
-
-cdef class Grammar:
-    cdef c.cg3_grammar* _raw
-    cdef str filename
-
-    @staticmethod
-    def create(grammar_file):
-        grammar = Grammar()
-
-        if not Path(grammar_file).is_file():
-            raise FileNotFoundError(grammar_file)
-
-        grammar.filename = grammar_file
-        with cg3_error():
-            grammar._raw = c.cg3_grammar_load(grammar_file.encode())
-
-        return grammar
-
-    def __repr__(self):
-        return '<{} file: "{}">'.format(
-            self.__class__.__name__, self.filename)
-
-    def create_applicator(self):
-        with cg3_error():
-            raw = c.cg3_applicator_create(self._raw)
-            return Applicator.create(raw)
-
-    def __dealloc__(self):
-        c.cg3_grammar_free(self._raw)
-
 
 # As the cg3 library is dependent on some global state, there is a
 # case for making this a singlton object. That could also make the
 # python api nicer.
 cdef class Applicator:
+    cdef c.cg3_grammar* _raw_grammar
     cdef c.cg3_applicator* _raw
+    cdef str grammar_file
 
-    @staticmethod
-    cdef create(c.cg3_applicator* raw):
-        applicator = Applicator()
-        applicator._raw = raw
-        c.cg3_applicator_setflags(raw, c.CG3F_NO_PASS_ORIGIN)
-        return applicator
+    def __cinit__(self, grammar_file):
+        if not Path(grammar_file).is_file():
+            raise FileNotFoundError(grammar_file)
+
+        self.grammar_file = grammar_file
+        with cg3_error():
+            self._raw_grammar = c.cg3_grammar_load(grammar_file.encode())
+
+        with cg3_error():
+            self._raw = c.cg3_applicator_create(self._raw_grammar)
+
+        c.cg3_applicator_setflags(self._raw, c.CG3F_NO_PASS_ORIGIN)
 
     def create_tag(self, text):
         cdef c.cg3_tag* tag
+        if not text:
+            raise ValueError('Cannot create tag with empty string')
+        if '\x00' in text:
+            raise ValueError('Cannot create tag that contains "\\x00": {}'.format(repr(text)))
         try:
             tag = c.cg3_tag_create_u8(self._raw, text.encode())
         except TypeError:
-           tag = c.cg3_tag_create_u8(self._raw, text)
+            tag = c.cg3_tag_create_u8(self._raw, text)
         return Tag.create(tag)
 
     def parse(self, f):
@@ -318,31 +308,34 @@ cdef class Applicator:
 
         pos = toktype('PoS')
         reading = toktype('Reading') + many(pos)
-        cohort = toktype('Cohort') + oneplus(reading)
+        cohort = toktype('Cohort') + many(reading)
         parser = many(cohort)
 
         document = parser.parse(tokens)
 
         cdef c.cg3_sentence* sentence = c.cg3_sentence_new(self._raw)
-        doc = Document.create(sentence)
+        doc = Document.create(sentence, self)
 
-        for cohort in document:
-            wordform, *readings = cohort
+        for wordform, readings in document:
             wordform = self.create_tag(wordform)
             cohort = doc.create_cohort(wordform)
-            for pos in readings:
+
+            for lexeme, part_of_speech in readings:
+                lexeme = self.create_tag(lexeme)
                 reading = cohort.create_reading()
-                for p in pos:
-                    p = self.create_tag(p)
-                    reading.add_tag(p)
+                reading.add_tag(lexeme)
+                for pos in part_of_speech:
+                    pos = self.create_tag(pos)
+                    reading.add_tag(pos)
                 cohort.add_reading(reading)
             doc.add_cohort(cohort)
 
         return doc
 
     def run_rules(self, Document doc):
-        with cg3_error:
+        with cg3_error():
             c.cg3_sentence_runrules(self._raw, doc._raw)
 
     def __dealloc__(self):
         c.cg3_applicator_free(self._raw)
+        c.cg3_grammar_free(self._raw_grammar)

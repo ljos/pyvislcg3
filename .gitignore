@@ -5,3 +5,5 @@ src/cg3/*.c
 *.o
 *.pyc
 /cg3/**/*.c
+/.hypothesis/unicodedata/8.0.0/charmap.pickle.gz
+/pyvislcg3.egg-info/

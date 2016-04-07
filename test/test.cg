@@ -1,0 +1,55 @@
+"<karl>"
+	"Karl" subst prop mask
+"<ove>"
+	"Ove" subst prop mask <*>
+"<knausgård>"
+	"Knausgård" subst prop <*gård> <*>
+"<er>"
+	"være" verb pres a5 pr1 pr2 <aux1/perf_part>
+"<som>"
+	"som" sbu
+	"som" prep
+"<første>"
+	"første" adj nøyt ub ent pos <ordenstall>
+	"første" adj ub m/f ent pos <ordenstall>
+	"første" adj fl pos <ordenstall>
+	"første" adj be ent pos <ordenstall>
+"<forfatter>"
+	"forfatte" verb pres tr9
+	"forfatter" subst appell mask ub ent
+"<noensinne>"
+	"noensinne" adv
+"<tildelt>"
+	"tildele" verb perf-part d1
+	"tildele" adj nøyt ub ent <perf-part> d1
+	"tildele" adj ub m/f ent <perf-part> d1
+"<prisen>"
+	"prise" subst appell mask be ent
+	"pris" subst appell mask be ent
+"<i>"
+	"i" prep
+	"i" subst appell mask ub ent
+"<klassen>"
+	"klasse" subst appell mask be ent
+"<for>"
+	"for" adv
+	"for" prep
+	"for" konj clb
+	"fore" verb imp
+	"fare" verb pret tr11 a3 pa4 pa5 pr11
+"<litteratur>"
+	"litteratur" subst appell mask ub ent
+"<,>"
+	"$," clb <komma>
+	"$," <komma>
+"<i>"
+	"i" prep
+	"i" subst appell mask ub ent
+"<wall>"
+	"Wall" subst prop <*>
+"<street>"
+	"Street" subst prop <*>
+"<journal>"
+	"Journal" subst prop <*>
+"<.>"
+	"$." clb <<< <punkt>
