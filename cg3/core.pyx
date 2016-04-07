@@ -90,9 +90,6 @@ cdef class Grammar:
         c.cg3_grammar_free(self._raw)
 
 
-# As the cg3 library is dependent on some global state, there is a
-# case for making this a singlton object. That could also make the
-# python api nicer.
 cdef class Applicator:
     cdef Grammar _grammar
     cdef c.cg3_applicator* _raw
@@ -146,6 +143,7 @@ cdef class Applicator:
         doc = parser.parse(tokens)
         return Document(doc)
 
+
     def run_rules(self, doc):
         cdef c.cg3_sentence* window
         cdef c.cg3_tag* tag
@@ -153,6 +151,7 @@ cdef class Applicator:
         cdef c.cg3_reading* reading
 
         try:
+            # Read document to c structure.
             window = c.cg3_sentence_new(self._raw)
             for wordform, readings in doc:
                 tag = self.create_tag(wordform)
@@ -171,9 +170,11 @@ cdef class Applicator:
                     c.cg3_cohort_addreading(cohort, reading)
                 c.cg3_sentence_addcohort(window, cohort)
 
+            # Run constraint grammar rules.
             with cg3_error():
                 c.cg3_sentence_runrules(self._raw, window)
 
+            # Convert document back to python structure.
             doc = []
             n = c.cg3_sentence_numcohorts(window)
             # The first cohort is >>>, we don't need that.
