@@ -143,7 +143,10 @@ cdef class Applicator:
         cohort = toktype('Cohort') + many(reading)
         parser = many(cohort)
 
+        # Output looks like
+        # [('"<Cohort">', [('"Lexeme"', ['PoS', ...]), ...]) ...]
         doc = parser.parse(tokens)
+
         return Document(doc)
 
 
