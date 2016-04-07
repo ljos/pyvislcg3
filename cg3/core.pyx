@@ -254,11 +254,34 @@ cdef class Document:
     def __dealloc__(self):
         c.cg3_sentence_free(self._raw)
 
+cdef class Grammar:
+    cdef c.cg3_grammar* _raw
+    cdef str grammar_file
+
+    def __cinit__(self, str grammar_file):
+        if not Path(grammar_file).is_file():
+            raise FileNotFoundError(grammar_file)
+        self.grammar_file = grammar_file
+        with cg3_error():
+            self._raw = c.cg3_grammar_load(grammar_file.encode())
+
+    def __repr__(self):
+        return '<{} file: {}>'.format(
+            self.__class__.__name__, self.grammar_file)
+
+    cdef c.cg3_applicator* _create_applicator(self):
+        with cg3_error():
+            return c.cg3_applicator_create(self._raw)
+
+    def __dealloc__(self):
+        c.cg3_grammar_free(self._raw)
+
+
 # As the cg3 library is dependent on some global state, there is a
 # case for making this a singlton object. That could also make the
 # python api nicer.
 cdef class Applicator:
-    cdef c.cg3_grammar* _raw_grammar
+    cdef Grammar _grammar
     cdef c.cg3_applicator* _raw
     cdef str grammar_file
 
@@ -266,16 +289,12 @@ cdef class Applicator:
         if not Path(grammar_file).is_file():
             raise FileNotFoundError(grammar_file)
 
-        self.grammar_file = grammar_file
-        with cg3_error():
-            self._raw_grammar = c.cg3_grammar_load(grammar_file.encode())
+        self._grammar = Grammar(grammar_file)
 
-        with cg3_error():
-            self._raw = c.cg3_applicator_create(self._raw_grammar)
-
+        self._raw = self._grammar._create_applicator()
         c.cg3_applicator_setflags(self._raw, c.CG3F_NO_PASS_ORIGIN)
 
-    def create_tag(self, text):
+    cdef c.cg3_tag* create_tag(self, text):
         cdef c.cg3_tag* tag
         if not text:
             raise ValueError('Cannot create tag with empty string')
@@ -338,4 +357,3 @@ cdef class Applicator:
 
     def __dealloc__(self):
         c.cg3_applicator_free(self._raw)
-        c.cg3_grammar_free(self._raw_grammar)
