@@ -1,4 +1,4 @@
-# Cython bindings to libcg3
+""" Cython bindings to libcg3 """
 
 cimport cg3.ccore as c
 
@@ -211,6 +211,7 @@ cdef class Applicator:
             return Document(doc)
         finally:
             c.cg3_sentence_free(window)
+
 
     def __dealloc__(self):
         c.cg3_applicator_free(self._raw)

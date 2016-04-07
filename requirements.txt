@@ -1,2 +1,2 @@
-cython
-funcparserlib
+cython>=0.24
+funcparserlib>=0.3.6
