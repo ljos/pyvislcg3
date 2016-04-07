@@ -12,6 +12,9 @@ from pathlib import Path
 from re import fullmatch, findall
 from tempfile import mkstemp
 
+
+# This class is basically just so that we have an easy way to
+# serialize the document to a string.
 class Document:
 
     def __init__(self, doc):
