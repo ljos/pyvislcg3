@@ -8,10 +8,14 @@ from contextlib import contextmanager
 from funcparserlib.lexer import make_tokenizer
 from funcparserlib.parser import oneplus, many, some
 from libc.stdio cimport FILE, fdopen
+from logger import getLogger, NullHandler
 from pathlib import Path
 from re import fullmatch, findall
 from tempfile import mkstemp
 
+
+logger = getLogger(__name__)
+logger.addHandler(NullHandler())
 
 class Reading:
 
@@ -84,15 +88,18 @@ def cg3_error():
         yield
 
         c.cg3_cleanup()
-        with open(path) as err:
-            error_msg = err.readline()
-            # CG3 also reports warnings, so we need to check if it
-            # really is a error that we are recieving. It would be
-            # better if we could check the if return from CG3 is
-            # NULL, but I don't know how to do that with a context
-            # manager.
-            if error_msg.startswith('CG3 Error:'):
-                raise Exception(error_msg)
+        with open(path) as err_file:
+            for msg in err_file:
+                if msg.startswith('(CG3 )?[Ee]rror:'):
+                    logger.error(msg)
+                    raise Exception(msg)
+                elif msg.startswith('(CG3 )?[Ww]arning:'):
+                    logger.warning(msg)
+                elif msg.startswith('(CG3 )?[Dd]ebug:'):
+                    logger.debug(msg)
+                else:
+                    logger.info(msg)
+
     finally:
         # Remove the file from the OS.
         os.remove(path)
