@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from funcparserlib.lexer import make_tokenizer
 from funcparserlib.parser import oneplus, many, some
 from libc.stdio cimport FILE, fdopen
-from logger import getLogger, NullHandler
+from logging import getLogger, NullHandler
 from pathlib import Path
 from re import fullmatch, findall
 from tempfile import mkstemp
@@ -32,7 +32,11 @@ class Reading:
         return '<{} {}>'.format(self.__class__.__name__, self.lexeme)
 
     def __str__(self):
-        return '{} {}'.format(self.lexeme, ' '.join(self.part_of_speech))
+        return ' '.join([self.lexeme] + self.part_of_speech)
+
+    def __eq__(self, other):
+        return (self.lexeme == other.lexeme and
+                self.part_of_speech == other.part_of_speech)
 
 
 class Cohort:
@@ -49,8 +53,13 @@ class Cohort:
         return '<{} {}>'.format(self.__class__.__name__, self.wordform)
 
     def __str__(self):
-        lines = [self.wordform] + ['\t{!s}'.format(reading) for reading in self.readings]
+        lines = ([self.wordform] +
+                 ['\t{!s}'.format(reading) for reading in self.readings])
         return '\n'.join(lines)
+
+    def __eq__(self, other):
+        return (self.wordform == other.wordform and
+                self.readings == other.readings)
 
 
 class Document:
@@ -62,7 +71,10 @@ class Document:
         return iter(self.cohorts)
 
     def __str__(self):
-        return '\n'.join(self.cohorts)
+        return '\n'.join(map(str, self.cohorts))
+
+    def __eq__(self, other):
+        return self.cohorts == other.cohorts
 
 
 # We are using a context manager instead of a decorator because cython
@@ -155,8 +167,8 @@ cdef class Applicator:
     def parse(self, string):
         def tokenize(string):
             specs = [
-                ('Cohort', (r'"<[^>]+>"',)),
-                ('Reading', (r'"[^"]+"',)),
+                ('Cohort', (r'"<.+>"',)),
+                ('Reading', (r'".+"',)),
                 ('Space', (r'\s+',)),
                 ('NL', (r'[\r\n]+',)),
                 ('PoS', (r'\S+',))
