@@ -13,23 +13,52 @@ from re import fullmatch, findall
 from tempfile import mkstemp
 
 
-# This class is basically just so that we have an easy way to
-# serialize the document to a string.
-class Document:
+class Reading:
 
-    def __init__(self, doc):
-        self.doc = doc
+    def __init__(self, lexeme, part_of_speech):
+        self.lexeme = lexeme
+        self.part_of_speech = part_of_speech
 
     def __iter__(self):
-        return iter(self.doc)
+        yield self.lexeme
+        for pos in self.part_of_speech:
+            yield pos
+
+    def __repr__(self):
+        return '<{} {}>'.format(self.__class__.__name__, self.lexeme)
 
     def __str__(self):
-        output = []
-        for cohort, readings in self.doc:
-            output.append(cohort)
-            for lexeme, part_of_speech in readings:
-                output.append('\t{} {}'.format(lexeme, ' '.join(part_of_speech)))
-        return '\n'.join(output)
+        return '{} {}'.format(self.lexeme, ' '.join(self.part_of_speech))
+
+
+class Cohort:
+    def __init__(self, wordform, readings):
+        self.wordform = wordform
+        self.readings = readings
+
+    def __iter__(self):
+        yield self.wordform
+        for reading in self.readings:
+            yield reading
+
+    def __repr(self):
+        return '<{} {}>'.format(self.__class__.__name__, self.wordform)
+
+    def __str__(self):
+        lines = [self.wordform] + ['\t{!s}'.format(reading) for reading in self.readings]
+        return '\n'.join(lines)
+
+
+class Document:
+
+    def __init__(self, cohorts):
+        self.cohorts = cohorts
+
+    def __iter__(self):
+        return iter(self.cohorts)
+
+    def __str__(self):
+        return '\n'.join(self.cohorts)
 
 
 # We are using a context manager instead of a decorator because cython
@@ -41,7 +70,6 @@ def cg3_error():
     try:
         fd, path = mkstemp()
         f = fdopen(fd, 'w')
-
 
         # We only need one FILE object as cg3 only prints to the error
         # file.
@@ -85,7 +113,8 @@ cdef class Grammar:
         return '<{} file: {}>'.format(
             self.__class__.__name__, self.grammar_file)
 
-    cdef c.cg3_applicator* _create_applicator(self):
+
+    cdef c.cg3_applicator* create_applicator(self):
         with cg3_error():
             return c.cg3_applicator_create(self._raw)
 
@@ -96,16 +125,13 @@ cdef class Grammar:
 cdef class Applicator:
     cdef Grammar _grammar
     cdef c.cg3_applicator* _raw
-    cdef str grammar_file
 
     def __cinit__(self, grammar_file):
-        if not Path(grammar_file).is_file():
-            raise FileNotFoundError(grammar_file)
-
         self._grammar = Grammar(grammar_file)
 
-        self._raw = self._grammar._create_applicator()
+        self._raw = self._grammar.create_applicator()
         c.cg3_applicator_setflags(self._raw, c.CG3F_NO_PASS_ORIGIN)
+
 
     cdef c.cg3_tag* create_tag(self, text):
         cdef c.cg3_tag* tag
@@ -119,35 +145,44 @@ cdef class Applicator:
             tag = c.cg3_tag_create_u8(self._raw, text)
         return tag
 
-    def parse(self, f):
+    def parse(self, string):
         def tokenize(string):
             specs = [
-                ('Word', (r'<word>.+</word>',)),
                 ('Cohort', (r'"<[^>]+>"',)),
                 ('Reading', (r'"[^"]+"',)),
                 ('Space', (r'\s+',)),
                 ('NL', (r'[\r\n]+',)),
                 ('PoS', (r'\S+',))
             ]
-            useless = ['NL', 'Space', 'Word']
+            useless = ['NL', 'Space']
             t = make_tokenizer(specs)
             return [x for x in t(string) if x.type not in useless]
 
-        tokens = tokenize(f.read())
+        tokens = tokenize(string)
 
-        tokval = lambda x: x.value
-        toktype = lambda t: some(lambda x: x.type == t) >> tokval
+        def tokval(x):
+            return x.value
+
+        def toktype(t):
+            return some(lambda x: x.type == t) >> tokval
+
+        def make_reading(val):
+            lexeme, part_of_speech = val
+            return Reading(lexeme, part_of_speech)
+
+        def make_cohort(val):
+            wordform, readings = val
+            return Cohort(wordform, readings)
+
+        def make_document(val):
+            return Document(val)
 
         pos = toktype('PoS')
-        reading = toktype('Reading') + many(pos)
-        cohort = toktype('Cohort') + many(reading)
-        parser = many(cohort)
+        reading = toktype('Reading') + many(pos) >> make_reading
+        cohort = toktype('Cohort') + many(reading) >> make_cohort
+        parser = many(cohort) >> make_document
 
-        # Output looks like
-        # [('"<Cohort">', [('"Lexeme"', ['PoS', ...]), ...]) ...]
-        doc = parser.parse(tokens)
-
-        return Document(doc)
+        return parser.parse(tokens)
 
 
     def run_rules(self, doc):
@@ -157,7 +192,12 @@ cdef class Applicator:
         cdef c.cg3_reading* reading
 
         try:
-            # Read document to c structure.
+            # Read document to c structure. We don't keep the C
+            # structure, but release it when cg3 is finished with it
+            # and we have moved the information we are interested in
+            # into C. We do this because when the Applicator is
+            # released it also release the sentences that belong to
+            # the Applicator.
             window = c.cg3_sentence_new(self._raw)
             for wordform, readings in doc:
                 tag = self.create_tag(wordform)
@@ -197,16 +237,16 @@ cdef class Applicator:
                     # lexeme.
                     for k in range(2, n):
                         tag = c.cg3_reading_gettag(reading, k)
-                        name = c.cg3_tag_gettext_u8(tag).decode()
-                        part_of_speech.append(name)
+                        pos = c.cg3_tag_gettext_u8(tag).decode()
+                        part_of_speech.append(pos)
 
                     tag = c.cg3_reading_gettag(reading, 1)
-                    name = c.cg3_tag_gettext_u8(tag).decode()
-                    readings.append((name, part_of_speech))
+                    lexeme = c.cg3_tag_gettext_u8(tag).decode()
+                    readings.append(Reading(lexeme, part_of_speech))
 
                 tag = c.cg3_cohort_getwordform(cohort)
-                name = c.cg3_tag_gettext_u8(tag).decode()
-                doc.append((name, readings))
+                wordform = c.cg3_tag_gettext_u8(tag).decode()
+                doc.append(Cohort(wordform, readings))
 
             return Document(doc)
         finally:
