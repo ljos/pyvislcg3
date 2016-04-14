@@ -7,7 +7,6 @@ from re import sub
 from string import punctuation, ascii_letters
 
 def tag():
-    # Remove whitespace and two control characters.
     chars = ascii_letters + 'æøå'
     return text(alphabet=chars, min_size=1)
 
@@ -32,10 +31,7 @@ def cohort(draw):
     return Cohort(wordform, readings)
 
 def document():
-    return lists(
-        cohort(),
-        min_size=1,
-        max_size=5).map(Document)
+    return lists(cohort(), min_size=1, max_size=5).map(Document)
 
 class TestCG3(TestCase):
 
